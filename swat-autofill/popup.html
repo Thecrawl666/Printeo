@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>SWAT Autofill</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="app__header">
+      <span class="app__logo">✈</span>
+      <h1 class="app__title">SWAT AUTOFILL</h1>
+      <button id="themeToggle" class="icon-btn" title="Basculer le thème">🌓</button>
+    </header>
+
+    <section id="profilesSection" class="profiles">
+      <p class="profiles__loading">Chargement des profils…</p>
+    </section>
+
+    <section class="intervenant">
+      <div class="intervenant__header">
+        <label class="intervenant__label">Nom du 1er intervenant (clique pour choisir)</label>
+        <button id="intervenantRefresh" class="icon-btn" title="Relire la vraie liste depuis la page ouverte (lecture seule, rien n'est modifié)">🔄</button>
+      </div>
+      <div id="intervenantList" class="intervenant-list">
+        <p class="intervenant-list__loading">Chargement…</p>
+      </div>
+    </section>
+
+    <section class="options">
+      <button id="optionsToggle" class="options__header">
+        <span>⚙ Options</span>
+        <span id="optionsChevron" class="options__chevron">▾</span>
+      </button>
+      <div id="optionsBody" class="options__body">
+        <label class="checkbox">
+          <input type="checkbox" id="optFillEditors" checked />
+          Remplir les CKEditor
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="optCheckValidations" checked />
+          Cocher les validations
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="optRememberProfile" checked />
+          Utiliser le dernier profil
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="optShowProgress" checked />
+          Afficher la progression
+        </label>
+        <label class="checkbox checkbox--experimental">
+          <input type="checkbox" id="optAttemptWorkload" />
+          Créer le Workload dans l'onglet Impact (⚠ expérimental, à vérifier)
+        </label>
+      </div>
+    </section>
+
+    <div class="action-row">
+      <button id="launchBtn" class="launch-btn" disabled>
+        ▶ LANCER
+      </button>
+      <button id="diagnoseBtn" class="diagnose-btn" disabled title="Analyse complète en lecture seule : ne modifie rien sur la swat">
+        🔍 Analyser
+      </button>
+    </div>
+
+    <section id="diagnosticSection" class="diagnostic hidden">
+      <div class="diagnostic__header">
+        <h2 class="diagnostic__title">Rapport d'analyse <span class="diagnostic__hint">(lecture seule, rien n'est modifié)</span></h2>
+        <button id="diagnosticCopy" class="icon-btn" title="Copier le rapport complet">📋</button>
+      </div>
+      <div id="diagnosticSummary" class="diagnostic__summary"></div>
+      <ul id="diagnosticList" class="diagnostic__list"></ul>
+    </section>
+
+    <section id="progressSection" class="progress hidden">
+      <div class="progress__bar">
+        <div id="progressFill" class="progress__fill"></div>
+      </div>
+      <div id="progressPercent" class="progress__percent">0%</div>
+      <ul id="progressList" class="progress__list"></ul>
+    </section>
+
+    <section id="reportSection" class="report hidden">
+      <h2 class="report__title">Rapport d'exécution</h2>
+      <div class="report__stats">
+        <div class="report__stat">
+          <span class="report__stat-value" id="reportDuration">–</span>
+          <span class="report__stat-label">Temps</span>
+        </div>
+        <div class="report__stat">
+          <span class="report__stat-value" id="reportFilled">–</span>
+          <span class="report__stat-label">Champs remplis</span>
+        </div>
+        <div class="report__stat">
+          <span class="report__stat-value" id="reportErrors">–</span>
+          <span class="report__stat-label">Erreurs</span>
+        </div>
+      </div>
+      <ul id="reportErrorList" class="report__error-list"></ul>
+    </section>
+
+    <button id="settingsBtn" class="settings-btn">⚙ Paramètres (surcharges JSON)</button>
+
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal__content">
+        <div class="modal__header">
+          <h2>Paramètres des profils</h2>
+          <button id="settingsClose" class="icon-btn">✕</button>
+        </div>
+        <p class="modal__hint">
+          Les profils par défaut vivent dans les fichiers profiles/*.json de l'extension —
+          modifie-les directement pour un changement permanent. Ce champ sert aux surcharges
+          rapides, par identifiant de profil, fusionnées par-dessus à chaque lancement.
+          Laisse vide pour ne rien surcharger.
+        </p>
+        <textarea id="profilesJson" class="modal__textarea" spellcheck="false" placeholder='{
+  "methodes-ebenisterie": {
+    "fields": { "chapitreAta": "57 - AILES" }
+  }
+}'></textarea>
+        <div id="settingsError" class="modal__error hidden"></div>
+        <div class="modal__actions">
+          <button id="settingsReset" class="btn btn--ghost">Réinitialiser</button>
+          <button id="settingsSave" class="btn btn--primary">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

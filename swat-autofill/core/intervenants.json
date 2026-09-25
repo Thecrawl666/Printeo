@@ -1,0 +1,6 @@
+{
+  "_comment": "Liste des noms affichés dans le popup pour le champ 'Nom du premier intervenant' — un simple clic les sélectionne, plus besoin de taper. Édite cette liste directement (ajoute/retire une ligne dans 'names') pour qu'elle corresponde aux membres de ton groupe. Chaque nom doit correspondre EXACTEMENT (orthographe, accents, espaces) au texte de l'option telle qu'elle apparaît dans la vraie liste déroulante de Swatsheet, sinon le remplissage échouera avec 'option introuvable dans la liste' — utilise le bouton 🔍 Analyser pour vérifier après un ajout.",
+  "names": [
+    "Alex Alfonsi"
+  ]
+}
