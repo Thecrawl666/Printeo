@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWAT Autofill
 // @namespace    swat-autofill
-// @version      3.0.0
+// @version      3.1.0
 // @description  Remplissage automatique des formulaires RFC/SWAT (Swatsheet) — panneau flottant, profils JSON embarqués. Généré depuis core/ — ne pas éditer ce fichier à la main, voir tools/build-userscript.mjs.
 // @author       Alex Alfonsi
 // @match        *://swatsheet.ca.aero.bombardier.net/*
@@ -234,7 +234,16 @@
       closeMenuWithoutSelecting(input);
       return targetOption
         ? { ok: true, detail: `valeur "${textToSelect}" présente dans la liste` }
-        : { ok: false, warn: true, detail: `valeur "${textToSelect}" INTROUVABLE dans la liste actuellement affichée` };
+        : {
+            ok: false,
+            warn: true,
+            detail:
+              `valeur "${textToSelect}" INTROUVABLE dans la liste actuellement affichée — ` +
+              `si ce champ dépend d'un autre choisi plus haut (ex. une liste en cascade), ` +
+              `ce peut être un faux avertissement : l'analyse n'écrit jamais rien, donc le ` +
+              `champ dont celui-ci dépend n'a pas encore été réellement sélectionné à ce ` +
+              `stade — vérifie avec ▶ LANCER, qui remplit dans l'ordre et donc dans le bon contexte`
+          };
     }
 
     if (!targetOption) {
@@ -444,6 +453,52 @@
    * l'onglet/l'éditeur existent et ne sont pas verrouillés — ne simule
    * JAMAIS de collage, pour rester strictement en lecture seule.
    */
+  /**
+   * Sélectionne tout le contenu de `el` (sélection native + un vrai Ctrl+A
+   * dispatché, que CKEditor 5 écoute pour agir sur son modèle interne — cf
+   * commentaire historique plus bas).
+   */
+  async function selectAllContent(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    await sleep(120);
+
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", code: "KeyA", keyCode: 65, which: 65, ctrlKey: true, bubbles: true, cancelable: true })
+    );
+    await sleep(200);
+  }
+
+  function normalizedInnerText(el) {
+    return (el.innerText || "").replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * v3.1.0 — CKEditor 5 garde un MODÈLE interne séparé du DOM affiché : si
+   * un collage ne passe pas par son pipeline officiel (plugin Clipboard),
+   * le DOM peut changer un court instant puis être "réparé" (re-rendu à
+   * partir du modèle, resté inchangé) dès que l'éditeur se re-synchronise
+   * — ce qui ressemble à un succès immédiat suivi d'une disparition. La
+   * vérification précédente (un seul contrôle ~300ms après le collage) ne
+   * pouvait pas distinguer ça d'un vrai succès. Ici : un contrôle immédiat
+   * ET un second après un délai de stabilisation, qui doivent TOUS LES
+   * DEUX confirmer le contenu attendu.
+   *
+   * @returns {Promise<"ok"|"never-applied"|"reverted">}
+   */
+  async function verifyContentSettles(el, expectedSlice, settleMs = 1200) {
+    await sleep(300);
+    const immediate = normalizedInnerText(el).includes(expectedSlice);
+    if (!immediate) return "never-applied";
+
+    await sleep(settleMs);
+    const settled = normalizedInnerText(el).includes(expectedSlice);
+    return settled ? "ok" : "reverted";
+  }
+
   async function driveRichText(index, html, { dryRun = false, tabLabel } = {}) {
     const tabReady = await ensureDefinitionTab(tabLabel);
     if (!tabReady) {
@@ -468,51 +523,60 @@
     }
 
     const beforeText = el.innerText || "";
+    const newPlainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const expectedSlice = newPlainText.slice(0, 15);
+
     el.focus();
     await sleep(80);
 
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    await sleep(120);
-
-    el.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "a", code: "KeyA", keyCode: 65, which: 65, ctrlKey: true, bubbles: true, cancelable: true })
-    );
-    await sleep(200);
+    // ---- tentative 1 : évènement 'paste' simulé (pipeline officiel de
+    // CKEditor 5, cf historique v2.2.0) ------------------------------------
+    await selectAllContent(el);
 
     // La promesse de confirmation réseau est créée AVANT de dispatcher le
-    // collage (et donc avant les vérifications ci-dessous, qui prennent du
-    // temps) : l'application peut déclencher son auto-save très vite après
-    // la modification du DOM — l'attendre seulement APRÈS ces vérifications
-    // risquerait de rater l'évènement s'il arrive entre-temps (constaté via
-    // tests/fixture : un délai de sauvegarde aussi court que ~250ms peut
-    // survenir avant la fin des `sleep()` de vérification ci-dessous).
-    const savePromise = waitForSave(15000);
+    // collage : l'application peut déclencher son auto-save très vite après
+    // la modification du DOM — l'attendre seulement après les vérifications
+    // ci-dessous risquerait de rater l'évènement s'il arrive entre-temps.
+    let savePromise = waitForSave(8000);
 
     const dataTransfer = new DataTransfer();
     dataTransfer.setData("text/html", html);
     dataTransfer.setData("text/plain", beforeText);
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dataTransfer, bubbles: true, cancelable: true }));
-    await sleep(300);
 
-    const newPlainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const afterText = (el.innerText || "").trim();
-    // `el.innerText` insère un saut de ligne entre deux éléments de bloc
-    // (ex. <h3>…</h3><p>…</p>) là où newPlainText (dérivé du HTML par un
-    // simple remplacement de balises par un espace) n'a qu'un espace — sans
-    // cette normalisation identique des deux côtés, une comparaison par
-    // sous-chaîne dont les 15 premiers caractères chevauchent une frontière
-    // de bloc échoue à tort (trouvé via tests/fixture, cf tests/run-tests.mjs).
-    const afterTextNormalized = afterText.replace(/\s+/g, " ").trim();
-    const applied = newPlainText && afterTextNormalized.includes(newPlainText.slice(0, 15));
+    let outcome = await verifyContentSettles(el, expectedSlice);
 
-    if (!applied) {
-      return { ok: false, detail: "le collage automatique (évènement 'paste' simulé) n'a pas modifié le contenu visible — vérifier manuellement" };
+    // ---- tentative 2 (repli) : document.execCommand('insertHTML', …) —
+    // mécanisme d'édition natif du navigateur, indépendant du plugin
+    // Clipboard de CKEditor. À la différence du collage simulé, il déclenche
+    // de vraies mutations DOM + évènements 'input' natifs, que CKEditor 5
+    // réconcilie normalement avec son modèle au même titre qu'une saisie
+    // clavier réelle — utile si le plugin Clipboard ne traite pas notre
+    // évènement synthétique comme un collage valide (ex. DataTransfer
+    // construit par script jugé incomplet). Tenté uniquement si la 1re
+    // méthode n'a jamais pris OU a été annulée par CKEditor après coup.
+    if (outcome !== "ok") {
+      await selectAllContent(el);
+      savePromise = waitForSave(8000);
+      let execOk = false;
+      try {
+        execOk = document.execCommand("insertHTML", false, html);
+      } catch (e) {
+        execOk = false;
+      }
+      outcome = execOk ? await verifyContentSettles(el, expectedSlice) : "never-applied";
+
+      if (outcome !== "ok") {
+        const afterText = normalizedInnerText(el);
+        const reason =
+          outcome === "reverted"
+            ? "le texte a été inséré (collage simulé puis document.execCommand) mais annulé par l'éditeur peu après — CKEditor a probablement rejeté les deux tentatives et restauré son contenu par défaut : à corriger manuellement, et à remonter avec le détail exact vu à l'écran"
+            : "ni le collage simulé ni document.execCommand n'ont modifié le contenu visible — vérifier manuellement";
+        return { ok: false, detail: `${reason} (contenu actuel : ${afterText.length} caractères)` };
+      }
     }
 
+    const afterText = normalizedInnerText(el);
     if (beforeText.trim().length > 15 && afterText.length > newPlainText.length * 1.5) {
       return {
         ok: false,
@@ -524,7 +588,7 @@
     document.body.click();
     const saved = await savePromise;
     if (!saved) {
-      return { ok: true, warn: true, detail: "collage confirmé visuellement, mais aucune confirmation réseau de sauvegarde reçue après 15s — vérifie manuellement avant de changer d'onglet si possible" };
+      return { ok: true, warn: true, detail: "collage confirmé et stable, mais aucune confirmation réseau de sauvegarde reçue après 8s — vérifie manuellement avant de changer d'onglet si possible" };
     }
     return { ok: true };
   }

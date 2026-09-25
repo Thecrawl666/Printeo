@@ -56,7 +56,8 @@
     lockedPriority: params.has("lockedPriority"),
     readonlyEditor: params.has("readonlyEditor"),
     dupEditor: params.has("dupEditor"),
-    missingGroup: params.has("missingGroup")
+    missingGroup: params.has("missingGroup"),
+    revertPaste: params.has("revertPaste")
   };
 
   // ---- mock réseau ------------------------------------------------------
@@ -284,14 +285,35 @@
 
     [ed0, ed1].forEach((ed) => {
       let selectAllReceived = false;
+      let pasteRevertUsed = false;
       ed.addEventListener("keydown", (e) => {
         if (e.ctrlKey && (e.key === "a" || e.keyCode === 65)) selectAllReceived = true;
       });
       ed.addEventListener("paste", (e) => {
         const html = e.clipboardData.getData("text/html");
         const shouldClear = selectAllReceived && !SCN.dupEditor;
+        const before = ed.innerHTML;
         ed.innerHTML = shouldClear ? html : ed.innerHTML + html;
         selectAllReceived = false;
+
+        // ?revertPaste=1 — simule un vrai CKEditor 5 qui n'a jamais traité
+        // notre évènement 'paste' synthétique comme un collage valide via
+        // son plugin Clipboard : le DOM change un instant, puis l'éditeur
+        // "répare" l'affichage à partir de son modèle interne (resté
+        // inchangé) au rendu suivant. Sert à vérifier que
+        // verifyContentSettles() (core/engine.js) détecte bien ce cas et
+        // bascule sur le repli document.execCommand — qui, lui, n'est
+        // jamais annulé ici (mutation native du navigateur, hors de ce
+        // gestionnaire 'paste'). Ne s'applique qu'une fois par éditeur : le
+        // contenu inséré par le repli doit survivre normalement.
+        if (SCN.revertPaste && !pasteRevertUsed) {
+          pasteRevertUsed = true;
+          setTimeout(() => {
+            ed.innerHTML = before;
+          }, 700);
+          return;
+        }
+
         // Reproduit l'auto-save React de la vraie application : un seul
         // gros PUT après modification du contenu (cf core/engine.js,
         // installSaveWatcher — cette requête est ce qu'il observe pour

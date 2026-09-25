@@ -275,6 +275,29 @@ async function suiteA(browser) {
     await page.close();
   });
 
+  await test("collage annulé par l'éditeur (CKEditor 'répare' le DOM) -> repli document.execCommand, contenu final correct et stable", async () => {
+    // Reproduit le bug réel trouvé sur swatsheet.ca.aero.bombardier.net le
+    // 2026-09-25 (SW-236-359) : le collage simulé modifiait le DOM un
+    // instant, mais le texte par défaut de Bombardier revenait après coup —
+    // signe que CKEditor n'avait jamais traité l'évènement comme un vrai
+    // collage (son modèle interne, resté inchangé, "réparait" le DOM).
+    const page = await freshPage("?revertPaste=1");
+    const report = await page.evaluate(
+      ([fieldMap, profile]) =>
+        window.SwatEngine.process(fieldMap, profile, { dryRun: false, checkValidations: false, attemptWorkload: false }),
+      [fieldMap, methodesProfile]
+    );
+    const solutionFinale = report.results.find((r) => r.key === "solutionFinale");
+    assert.notEqual(solutionFinale.status, "error", "le repli execCommand doit rattraper le collage annulé : " + JSON.stringify(solutionFinale));
+
+    // Le contenu doit être celui du PROFIL, pas resté celui par défaut de
+    // Bombardier (exactement le symptôme observé en réel).
+    const finalText = await page.evaluate(() => document.querySelectorAll(".ck-editor__editable")[0].innerText);
+    assert.match(finalText, /Solution Finale/, "le contenu final doit être celui du profil, pas le texte par défaut inséré par Bombardier");
+    assert.doesNotMatch(finalText, /Texte par défaut inséré par Bombardier/, "le texte par défaut ne doit plus être présent");
+    await page.close();
+  });
+
   await test("Workload — groupe introuvable côté API -> création annulée avec raison claire, aucun POST envoyé", async () => {
     const page = await freshPage("?missingGroup=1");
     const report = await page.evaluate(

@@ -1,5 +1,48 @@
 # Changelog
 
+## v3.1.0 — Collage CKEditor : détection d'une annulation par l'éditeur + repli natif
+
+Trouvé sur un premier vrai test en conditions réelles (2026-09-25,
+SW-236-359, profil G7/8 Production) : la catégorisation et les cases à
+cocher se remplissaient correctement, mais le texte des éditeurs "Solution
+Finale"/"Plan d'action" restait celui par défaut de Bombardier après le
+remplissage — le collage simulé (évènement `paste`) semblait réussir sur
+l'instant, mais n'avait jamais persisté.
+
+**Cause probable** : CKEditor 5 garde un modèle interne séparé du DOM
+affiché. Si son plugin Clipboard ne traite pas notre évènement `paste`
+synthétique comme un collage valide (l'hypothèse la plus probable, sans
+pouvoir le confirmer en direct — voir plus bas), le DOM peut changer un
+court instant puis être "réparé" à partir du modèle (resté inchangé) au
+rendu suivant — indiscernable d'un succès par la vérification précédente,
+qui ne contrôlait le résultat qu'une seule fois, ~300ms après le collage.
+
+**Correctifs (`core/engine.js`, `driveRichText`)** :
+- Le résultat du collage est maintenant vérifié deux fois : immédiatement,
+  puis après un court délai de stabilisation — pour distinguer un vrai
+  succès d'un collage annulé après coup par l'éditeur.
+- Si le collage simulé est annulé (ou n'a jamais pris), un second
+  mécanisme est tenté : `document.execCommand("insertHTML", …)`, une
+  commande d'édition native du navigateur, indépendante du plugin
+  Clipboard de CKEditor — elle déclenche de vraies mutations DOM que
+  CKEditor 5 réconcilie normalement avec son modèle, au même titre qu'une
+  saisie clavier réelle.
+- Le délai d'attente de confirmation réseau de sauvegarde est réduit de
+  15s à 8s (il ne sert plus à rien d'attendre aussi longtemps une
+  confirmation qui, en cas d'échec des deux méthodes, n'arrivera jamais).
+- `tests/fixture` : nouveau scénario `?revertPaste=1` qui reproduit ce
+  comportement (le DOM change puis revient en arrière ~700ms après le
+  collage), avec un test dédié qui vérifie que le repli
+  `execCommand` rattrape bien la situation et que le contenu final est
+  correct et stable.
+
+**Limite assumée** : cette correction a été conçue et testée uniquement
+contre une page de test qui *simule* ce comportement — impossible de
+confirmer contre le vrai `swatsheet.ca.aero.bombardier.net` (inaccessible
+depuis l'environnement de développement). À reconfirmer sur un vrai test,
+DevTools ouverts (Console + Réseau), avant de considérer le problème
+résolu.
+
 ## v3.0.0 — Refonte complète (principe, moteur, tests, variante userscript)
 
 Réponse à la demande : repenser entièrement le principe et le fonctionnement
