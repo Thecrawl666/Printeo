@@ -1,0 +1,43 @@
+{
+  "_comment": "Configuration du ciblage DOM sur Swatsheet Next. Si Bombardier change la mise en page du formulaire, commence par ajuster ce fichier avant de toucher au code JS. 'match':'name' cible un attribut name= réel (fiable) ; 'match':'label' cherche le texte du label visible le plus proche (comme avant, mais chaque valeur vient maintenant d'un profil JSON plutôt que d'être codée en dur).",
+
+  "sequence": [
+    { "key": "intervenantName", "match": "label", "label": "Acheminement - Nom du premier intervenant", "freeText": false, "optional": true, "userInput": true },
+    { "key": "requiredBefore", "match": "name", "name": "requiredBefore", "freeText": false },
+    { "key": "autorite", "match": "label", "label": "Autorité (RFC, RFQ/P&O, PCR)", "freeText": true, "optional": true },
+    { "key": "chapitreAta", "match": "label", "label": "Chapitre Ata", "freeText": false },
+    { "key": "causeFonction", "match": "label", "label": "Cause racine - Fonction", "freeText": false },
+    { "key": "causeMetier", "match": "label", "label": "Cause racine - Métier", "freeText": false },
+    { "key": "causeRaison", "match": "label", "label": "Cause racine - Raison", "freeText": false },
+    { "key": "causeCategorie", "match": "label", "label": "Cause racine - Catégorie", "freeText": false },
+    { "key": "causeSousCategorie", "match": "label", "label": "Cause racine - Sous-catégorie", "freeText": false }
+  ],
+
+  "checkboxes": [
+    { "key": "priorite", "match": "name", "name": "priority", "label": "Priorité validée (P1, P2 or P3)" },
+    { "key": "avionsImpactes", "match": "name", "name": "impact", "label": "Avions impactés validés" },
+    { "key": "enjeuExistant", "match": "name", "name": "issue", "label": "Existence du même enjeu validé" },
+    { "key": "instructionsTravail", "match": "name", "name": "work", "label": "Instructions de travail validées" },
+    { "key": "documents", "match": "name", "name": "document", "label": "Documents validés (DWG, RV, DTS, SAP)" }
+  ],
+
+  "tabs": {
+    "definitionProbleme": "DÉFINITION",
+    "impact": "IMPACT"
+  },
+
+  "workload": {
+    "_note": "v2.8.0 : la création ne passe plus par un clic sur '+ Workload' ni par une recherche de champs dans le DOM (ancienne approche, abandonnée — trop fragile). Confirmée par une capture .har réelle d'une création manuelle par Alex : un simple appel direct POST /api/workload/create/{parentId} avec { assignedBdiGroup, assignedBdiUser, applyReviewEffectivity, addSwatTail }. Gros avantage : plus besoin de changer d'onglet vers Impact, donc plus aucun risque d'y perdre du contenu CKEditor non sauvegardé. groupsFeature sert à résoudre le nom du groupe du profil (ex. 'MET-SUP54') vers son ID réel via GET /api/bdi/groups?feature=... — si le nom ne correspond à aucun groupe retourné, la création est annulée plutôt que de deviner.",
+    "groupsFeature": "FEAT_SWATSHEET_REVIEW",
+    "applyReviewEffectivity": true,
+    "addSwatTail": false
+  },
+
+  "saveWatch": {
+    "_note": "v3.0.0 : généralisé depuis l'ancien inject.js (qui codait ce pattern en dur). L'ID interne de la swat (parentId) est mis en cache une fois résolu pour ne plus faire un appel réseau supplémentaire à chaque champ.",
+    "method": "PUT",
+    "urlPattern": "/api/swatsheet/reviewandapprove/update"
+  },
+
+  "_intervenantNote": "v2.3.0 : 'Nom du premier intervenant' passé de freeText:true à false. Ce champ est en réalité une vraie liste déroulante (visible avec un chevron sur les captures), pas un champ texte libre — taper un nom puis quitter le champ (ancien comportement freeText) ne le faisait jamais vraiment sélectionner comme option, d'où le nom qui ne s'inscrivait pas. Le popup ne permet plus de le taper : la valeur vient maintenant d'un clic dans la liste définie dans intervenants.json, et doit donc correspondre exactement au texte de l'option réelle dans Swatsheet."
+}

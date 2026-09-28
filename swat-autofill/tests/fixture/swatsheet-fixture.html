@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Fixture Swatsheet Next (test)</title>
+<style>
+  body { font-family: sans-serif; padding: 24px; }
+  .MuiFormControl-root { margin-bottom: 14px; display: block; }
+  .MuiFormControl-root label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+  .MuiSelect-select, .MuiInputBase-input { border: 1px solid #999; padding: 6px 10px; display: inline-block; min-width: 220px; cursor: pointer; background: #fff; }
+  ul.mock-listbox { position: absolute; list-style: none; margin: 0; padding: 4px 0; border: 1px solid #999; background: #fff; z-index: 9999; min-width: 220px; }
+  ul.mock-listbox li { padding: 6px 10px; cursor: pointer; }
+  ul.mock-listbox li:hover { background: #eee; }
+  [role="tab"] { display: inline-block; padding: 8px 14px; margin-right: 4px; border: 1px solid #ccc; cursor: pointer; }
+  [role="tab"][aria-selected="true"] { background: #1565c0; color: #fff; }
+  .ck-editor__editable { border: 1px solid #999; min-height: 80px; padding: 8px; margin-top: 6px; }
+  .ck-editor__editable.ck-read-only { background: #eee; color: #888; }
+  input[type="checkbox"] { transform: scale(1.3); margin-right: 6px; }
+</style>
+</head>
+<body>
+  <div id="swatsheetHeader">✈ G7500: STANDARD-G7500</div>
+
+  <h2>Formulaire RFC — SW-236-127 (fixture de test)</h2>
+
+  <div id="mainFields"></div>
+
+  <div id="tabsBar"></div>
+  <div id="tabPanels"></div>
+
+  <h3>Investigation</h3>
+  <div id="checkboxesContainer"></div>
+
+  <script>
+  /* =====================================================================
+   * Fixture "faux Swatsheet Next" — reproduit UNIQUEMENT les comportements
+   * JS dont core/engine.js dépend (pas une copie de l'app réelle) :
+   *   - MUI Select : clic sur l'activateur -> ouvre une liste en portail
+   *     (document.body), clic sur une option -> écrit la valeur ET ferme,
+   *     sans jamais rien sélectionner si on referme au clavier (Escape).
+   *   - MUI Autocomplete (chapitreAta ici) : input texte réel, filtrage
+   *     simple par sous-chaîne.
+   *   - Case à cocher : le "bug React" historique (onChange lié au natif
+   *     `click`, pas à `change`) est simulé en n'écoutant QUE `click`.
+   *   - CKEditor 5 : un `paste` remplace le contenu SEULEMENT si un
+   *     Ctrl+A a été reçu juste avant (sinon il s'ajoute par-dessus —
+   *     sert à tester la détection de duplication, ?dupEditor=1).
+   *   - API réseau (résolution Workload + sauvegarde) : window.fetch est
+   *     remplacé ici par une fausse implémentation en mémoire, AVANT que
+   *     core/engine.js n'installe son propre intercepteur par-dessus
+   *     (chaîne : engine.installSaveWatcher() enveloppe CE fetch mocké).
+   * =================================================================== */
+  const params = new URLSearchParams(location.search);
+  const SCN = {
+    missingOption: params.has("missingOption"),
+    lockedPriority: params.has("lockedPriority"),
+    readonlyEditor: params.has("readonlyEditor"),
+    dupEditor: params.has("dupEditor"),
+    missingGroup: params.has("missingGroup"),
+    revertPaste: params.has("revertPaste")
+  };
+
+  // ---- mock réseau ------------------------------------------------------
+  window.__calls = { workloadPayload: null, saveCount: 0, workloadCreateCalled: false };
+  const GROUPS = [
+    { id: 4185, name: "MET-SUP54" },
+    { id: 4186, name: "PROD-SUP54" },
+    { id: 4187, name: "CNC-SUP54" },
+    { id: 4188, name: "ING-SUP54" },
+    { id: 4189, name: "PROG-SUP54" }
+  ].filter((g) => !(SCN.missingGroup && g.name === "MET-SUP54"));
+  const USERS = [{ userId: 77, name: "Alex Alfonsi" }];
+
+  window.fetch = async function (url, opts) {
+    const u = typeof url === "string" ? url : (url && url.url) || "";
+    const method = ((opts && opts.method) || "GET").toUpperCase();
+    const json = (data, status = 200) =>
+      new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+
+    if (/\/api\/swatsheet\/parent\/SW-\d+-\d+\/parentId/i.test(u)) {
+      return new Response("424242", { status: 200 });
+    }
+    if (/\/api\/bdi\/groups\?/i.test(u)) return json(GROUPS);
+    const gm = u.match(/\/api\/bdi\/groups\/(\d+)\/users-relation/);
+    if (gm) return json(USERS);
+    const wm = u.match(/\/api\/workload\/create\/(\d+)/);
+    if (wm && method === "POST") {
+      window.__calls.workloadCreateCalled = true;
+      window.__calls.workloadPayload = JSON.parse(opts.body);
+      return json({ hasError: false, data: { workloadNumber: "WL-000123" } });
+    }
+    if (/\/api\/swatsheet\/reviewandapprove\/update/i.test(u) && method === "PUT") {
+      window.__calls.saveCount += 1;
+      return json({ ok: true });
+    }
+    return json({ error: "endpoint non simulé: " + u }, 404);
+  };
+
+  // ---- helpers de construction du DOM ------------------------------------
+  function closeAnyListbox() {
+    document.querySelectorAll("ul.mock-listbox").forEach((el) => el.remove());
+    currentOpenRoot = null;
+  }
+
+  // Un SEUL écouteur global "clic en dehors -> ferme", qui ne ferme que si
+  // le clic est en dehors du champ ACTUELLEMENT ouvert (currentOpenRoot) —
+  // comme le vrai ClickAwayListener de MUI, qui n'est actif que pour le
+  // popper actuellement affiché. Un écouteur par champ (une v3.0.0 antérieure
+  // en avait un par appel de buildSelectField/buildAutocompleteField) casse
+  // dès qu'il y a plus d'un champ sur la page : ouvrir le champ A déclenche
+  // aussi l'écouteur "clic en dehors" de TOUS les autres champs B, C, D…
+  // (leur root ne contient pas le clic sur A) — qui referment alors
+  // immédiatement le menu que A vient d'ouvrir, avant même que le script
+  // n'ait eu le temps de lire ses options. Trouvé en pilotant le remplissage
+  // via le panneau flottant du userscript (tests/run-tests.mjs, suite B) :
+  // invisible en injection directe de core/engine.js car ce chemin de test
+  // ne construisait qu'un seul déclenchement de clic à la fois.
+  let currentOpenRoot = null;
+  document.addEventListener("click", (e) => {
+    if (!currentOpenRoot) return;
+    if (currentOpenRoot.contains(e.target) || e.target.closest("ul.mock-listbox")) return;
+    closeAnyListbox();
+  });
+
+  function buildSelectField({ name, label, options, hidden = true, containerId = "mainFields" }) {
+    const root = document.createElement("div");
+    root.className = "MuiFormControl-root";
+    if (label) {
+      const l = document.createElement("label");
+      l.textContent = label;
+      root.appendChild(l);
+    }
+    const activator = document.createElement("div");
+    activator.className = "MuiSelect-select";
+    activator.tabIndex = 0;
+    activator.textContent = "";
+    root.appendChild(activator);
+
+    const input = document.createElement("input");
+    input.type = hidden ? "hidden" : "text";
+    if (name) input.name = name;
+    root.appendChild(input);
+
+    function openMenu() {
+      closeAnyListbox();
+      const ul = document.createElement("ul");
+      ul.className = "mock-listbox";
+      const rect = activator.getBoundingClientRect();
+      ul.style.top = window.scrollY + rect.bottom + "px";
+      ul.style.left = window.scrollX + rect.left + "px";
+      options.forEach((optText) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = optText;
+        li.addEventListener("mousedown", (e) => e.preventDefault());
+        li.addEventListener("click", () => {
+          const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          nativeSetter.call(input, optText);
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          activator.textContent = optText;
+          closeAnyListbox();
+        });
+        ul.appendChild(li);
+      });
+      document.body.appendChild(ul);
+      currentOpenRoot = root;
+    }
+
+    activator.addEventListener("mousedown", openMenu);
+    activator.addEventListener("click", () => {
+      if (!document.querySelector("ul.mock-listbox")) openMenu();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAnyListbox();
+    });
+
+    document.getElementById(containerId).appendChild(root);
+    return { root, input, activator };
+  }
+
+  function buildAutocompleteField({ label, options }) {
+    const root = document.createElement("div");
+    root.className = "MuiFormControl-root";
+    const l = document.createElement("label");
+    l.textContent = label;
+    root.appendChild(l);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.setAttribute("role", "combobox");
+    input.className = "MuiInputBase-input";
+    root.appendChild(input);
+
+    function openMenu(filterText) {
+      closeAnyListbox();
+      const norm = (s) => (s || "").toLowerCase();
+      const matches = options.filter((o) => norm(o).includes(norm(filterText)));
+      if (!matches.length) return;
+      const ul = document.createElement("ul");
+      ul.className = "mock-listbox";
+      const rect = input.getBoundingClientRect();
+      ul.style.top = window.scrollY + rect.bottom + "px";
+      ul.style.left = window.scrollX + rect.left + "px";
+      matches.forEach((optText) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = optText;
+        li.addEventListener("mousedown", (e) => e.preventDefault());
+        li.addEventListener("click", () => {
+          const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          nativeSetter.call(input, optText);
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          closeAnyListbox();
+        });
+        ul.appendChild(li);
+      });
+      document.body.appendChild(ul);
+      currentOpenRoot = root;
+    }
+
+    input.addEventListener("focus", () => openMenu(input.value));
+    input.addEventListener("input", () => openMenu(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAnyListbox();
+    });
+
+    document.getElementById("mainFields").appendChild(root);
+    return { root, input, activator: input };
+  }
+
+  // ---- champs de la séquence (cf core/field-map.json) --------------------
+  buildSelectField({ label: "Acheminement - Nom du premier intervenant", options: ["Alex Alfonsi", "Autre Personne"] });
+  buildSelectField({ name: "requiredBefore", options: ["FABRICATION (M)", "LIVRAISON (D)"] });
+  const autoriteRoot = document.createElement("div");
+  autoriteRoot.className = "MuiFormControl-root";
+  autoriteRoot.innerHTML = '<label>Autorité (RFC, RFQ/P&O, PCR)</label>';
+  const autoriteInput = document.createElement("input");
+  autoriteInput.type = "text";
+  autoriteInput.className = "MuiInputBase-input";
+  autoriteRoot.appendChild(autoriteInput);
+  document.getElementById("mainFields").appendChild(autoriteRoot);
+
+  buildAutocompleteField({
+    label: "Chapitre Ata",
+    options: ["N/A not applicable", "57 - AILES"]
+  });
+  buildSelectField({ label: "Cause racine - Fonction", options: ["G 7/8 MÉTHODES ÉBÉNISTERIE", "G7/8 PRODUCTION"] });
+  buildSelectField({ label: "Cause racine - Métier", options: ["CONFIGURATION", "AUTRE"] });
+  buildSelectField({ label: "Cause racine - Raison", options: ["AMÉLIORATION", "AUTRE"] });
+  buildSelectField({ label: "Cause racine - Catégorie", options: SCN.missingOption ? ["AUTRE"] : ["TOOLING", "AUTRE"] });
+  buildSelectField({ label: "Cause racine - Sous-catégorie", options: ["ERGONOMIE", "AUTRE"] });
+
+  // ---- onglets + éditeurs riches ------------------------------------------
+  const tabsBar = document.getElementById("tabsBar");
+  const tabPanels = document.getElementById("tabPanels");
+  const tabDefs = ["GÉNÉRAL", "DÉFINITION DU PROBLÈME", "IMPACT"];
+  const tabs = tabDefs.map((label, i) => {
+    const t = document.createElement("div");
+    t.setAttribute("role", "tab");
+    t.setAttribute("aria-selected", i === 0 ? "true" : "false");
+    t.textContent = label;
+    t.addEventListener("click", () => selectTab(i));
+    tabsBar.appendChild(t);
+    return t;
+  });
+
+  function renderDefinitionPanel() {
+    tabPanels.innerHTML = "";
+    const DEFAULT_TEXT =
+      "<p>Texte par défaut inséré par Bombardier — à remplacer avant soumission. " +
+      "Ce paragraphe simule le contenu déjà présent dans un vrai éditeur CKEditor " +
+      "de Swatsheet au premier chargement du formulaire, pour que le test de " +
+      "détection de duplication (?dupEditor=1) ait quelque chose de réaliste à " +
+      "ne pas effacer.</p>";
+    const ed0 = document.createElement("div");
+    ed0.className = "ck-editor__editable";
+    ed0.setAttribute("contenteditable", "true");
+    ed0.innerHTML = DEFAULT_TEXT;
+    const ed1 = document.createElement("div");
+    ed1.className = "ck-editor__editable" + (SCN.readonlyEditor ? " ck-read-only" : "");
+    ed1.setAttribute("contenteditable", SCN.readonlyEditor ? "false" : "true");
+    ed1.innerHTML = DEFAULT_TEXT;
+    tabPanels.appendChild(ed0);
+    tabPanels.appendChild(ed1);
+
+    [ed0, ed1].forEach((ed) => {
+      let selectAllReceived = false;
+      let pasteRevertUsed = false;
+      ed.addEventListener("keydown", (e) => {
+        if (e.ctrlKey && (e.key === "a" || e.keyCode === 65)) selectAllReceived = true;
+      });
+      ed.addEventListener("paste", (e) => {
+        const html = e.clipboardData.getData("text/html");
+        const shouldClear = selectAllReceived && !SCN.dupEditor;
+        const before = ed.innerHTML;
+        ed.innerHTML = shouldClear ? html : ed.innerHTML + html;
+        selectAllReceived = false;
+
+        // ?revertPaste=1 — simule un vrai CKEditor 5 qui n'a jamais traité
+        // notre évènement 'paste' synthétique comme un collage valide via
+        // son plugin Clipboard : le DOM change un instant, puis l'éditeur
+        // "répare" l'affichage à partir de son modèle interne (resté
+        // inchangé) au rendu suivant. Sert à vérifier que
+        // verifyContentSettles() (core/engine.js) détecte bien ce cas et
+        // bascule sur le repli document.execCommand — qui, lui, n'est
+        // jamais annulé ici (mutation native du navigateur, hors de ce
+        // gestionnaire 'paste'). Ne s'applique qu'une fois par éditeur : le
+        // contenu inséré par le repli doit survivre normalement.
+        if (SCN.revertPaste && !pasteRevertUsed) {
+          pasteRevertUsed = true;
+          setTimeout(() => {
+            ed.innerHTML = before;
+          }, 700);
+          return;
+        }
+
+        // Reproduit l'auto-save React de la vraie application : un seul
+        // gros PUT après modification du contenu (cf core/engine.js,
+        // installSaveWatcher — cette requête est ce qu'il observe pour
+        // confirmer la sauvegarde réelle avant de rendre la main).
+        setTimeout(() => {
+          fetch("/api/swatsheet/reviewandapprove/update", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ok: true })
+          });
+        }, 250);
+      });
+    });
+  }
+
+  function selectTab(i) {
+    tabs.forEach((t, idx) => t.setAttribute("aria-selected", idx === i ? "true" : "false"));
+    if (i === 1) {
+      // léger délai pour exercer l'attente de montage de ensureDefinitionTab()
+      setTimeout(renderDefinitionPanel, 150);
+    } else {
+      tabPanels.innerHTML = "";
+    }
+  }
+
+  // ---- cases à cocher (Investigation) -------------------------------------
+  const checkboxDefs = [
+    { name: "priority", label: "Priorité validée (P1, P2 or P3)", disabled: SCN.lockedPriority },
+    { name: "impact", label: "Avions impactés validés", disabled: false },
+    { name: "issue", label: "Existence du même enjeu validé", disabled: false },
+    { name: "work", label: "Instructions de travail validées", disabled: false },
+    { name: "document", label: "Documents validés (DWG, RV, DTS, SAP)", disabled: true }
+  ];
+  const cbContainer = document.getElementById("checkboxesContainer");
+  checkboxDefs.forEach((def) => {
+    const label = document.createElement("label");
+    label.style.display = "block";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = def.name;
+    input.disabled = def.disabled;
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(def.label));
+    cbContainer.appendChild(label);
+    // Reproduit le bug historique : seul le natif `click` bascule l'état
+    // "métier" (ici on n'a rien d'autre à faire, le navigateur bascule déjà
+    // `.checked` nativement sur click — ce test valide juste que le script
+    // utilise bien .click() et non une manipulation directe de `.checked`).
+  });
+  </script>
+</body>
+</html>

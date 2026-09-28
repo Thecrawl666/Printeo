@@ -1,0 +1,35 @@
+{
+  "_comment": "Liste des profils disponibles dans le popup. Pour ajouter un profil : dépose un nouveau fichier profiles/<id>.json sur ce même modèle, puis ajoute une entrée ici. Pas besoin de toucher au code.",
+  "profiles": [
+    {
+      "id": "methodes-ebenisterie",
+      "label": "Méthodes ébénisterie",
+      "color": "#1565c0",
+      "file": "profiles/methodes-ebenisterie.json"
+    },
+    {
+      "id": "production-ebenisterie",
+      "label": "G7/8 Production (ébénisterie)",
+      "color": "#2e7d32",
+      "file": "profiles/production-ebenisterie.json"
+    },
+    {
+      "id": "ingenierie-ebenisterie",
+      "label": "Ingénierie ébénisterie",
+      "color": "#6a1b9a",
+      "file": "profiles/ingenierie-ebenisterie.json"
+    },
+    {
+      "id": "cnc-ebenisterie",
+      "label": "CNC ébénisterie",
+      "color": "#ef6c00",
+      "file": "profiles/cnc-ebenisterie.json"
+    },
+    {
+      "id": "programmation-ebenisterie",
+      "label": "Programmation ébénisterie",
+      "color": "#00838f",
+      "file": "profiles/programmation-ebenisterie.json"
+    }
+  ]
+}

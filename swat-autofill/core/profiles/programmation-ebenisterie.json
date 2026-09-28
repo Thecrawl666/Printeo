@@ -1,0 +1,33 @@
+{
+  "id": "programmation-ebenisterie",
+  "label": "Programmation ébénisterie",
+  "verified": false,
+  "_note": "PLACEHOLDER — mêmes réserves que ingenierie-ebenisterie.json : aucun exemple réel, valeurs devinées par analogie. À corriger avant la première utilisation.",
+  "fields": {
+    "requiredBefore": "FABRICATION (M)",
+    "autorite": "",
+    "chapitreAta": "N/A not applicable",
+    "causeFonction": "G 7/8 PROGRAMMATION ÉBÉNISTERIE",
+    "causeMetier": "À CONFIRMER",
+    "causeRaison": "AMÉLIORATION",
+    "causeCategorie": "À CONFIRMER",
+    "causeSousCategorie": "À CONFIRMER"
+  },
+  "editors": {
+    "solutionFinale": "<h3>Solution Finale</h3><p>Description de l'enjeu dans les mots de méthode:</p><p>&nbsp;</p><p>Description de la solution finale</p><p>&nbsp;</p><p>Court terme :</p><p>&nbsp;</p><p>Long terme :</p>",
+    "planAction": "<h3>Plan d'action</h3><p>Section affectée par l'enjeu : N/A</p><p>&nbsp;</p><p>Pièces affectées par l'enjeu : N/A</p><p>&nbsp;</p><p>Dessins impactés par l'enjeu : N/A</p><p>&nbsp;</p><p>Validation DDD prod :</p><p>&nbsp;</p><p>Commentaires</p>"
+  },
+  "checkboxes": {
+    "priorite": true,
+    "avionsImpactes": false,
+    "enjeuExistant": false,
+    "instructionsTravail": false,
+    "documents": false
+  },
+  "workload": {
+    "enabled": true,
+    "_note": "v2.8.0 : création via l'API REST (POST /api/workload/create) — voir la note dans methodes-ebenisterie.json (groupe MET-SUP54 confirmé par capture .har réelle ; les autres groupes suivent le même principe mais n'ont pas encore été vérifiés individuellement). 'groupe' doit correspondre EXACTEMENT au nom affiché par Swatsheet.",
+    "groupe": "PROG-SUP54",
+    "responsable": ""
+  }
+}
