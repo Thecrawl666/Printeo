@@ -14,17 +14,43 @@
  *     popup.js (chrome.scripting.executeScript).
  */
 (function () {
+  /**
+   * Injecte inject.js et ATTEND qu'il ait fini de charger (donc posé son
+   * marqueur `data-swat-fetch-bridge` sur le DOM, cf inject.js) avant de
+   * rendre la main — indispensable depuis que core/engine.js s'appuie sur
+   * ce marqueur pour savoir si le pont réseau est disponible : sans cette
+   * attente, un remplissage qui atteint l'étape Workload très vite (peu de
+   * champs avant, éditeurs désactivés) pourrait la manquer et retomber, à
+   * tort, sur un fetch() direct (donc sur le bug 403 que ce pont vise
+   * justement à contourner). Timeout de sécurité (2s) : si le script ne
+   * charge jamais pour une raison quelconque, on continue quand même —
+   * fetchJson retombera simplement sur un fetch() direct.
+   */
   function injectSaveWatcher() {
-    if (document.getElementById("__swat-inject-marker__")) return;
-    try {
-      const script = document.createElement("script");
-      script.id = "__swat-inject-marker__";
-      script.src = chrome.runtime.getURL("inject.js");
-      script.onload = () => script.remove();
-      (document.head || document.documentElement).appendChild(script);
-    } catch (e) {
-      console.log("[SWAT Autofill] injectSaveWatcher a échoué :", e);
-    }
+    if (document.getElementById("__swat-inject-marker__")) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      try {
+        const script = document.createElement("script");
+        script.id = "__swat-inject-marker__";
+        script.src = chrome.runtime.getURL("inject.js");
+        script.onload = () => {
+          script.remove();
+          finish();
+        };
+        script.onerror = finish;
+        (document.head || document.documentElement).appendChild(script);
+        setTimeout(finish, 2000);
+      } catch (e) {
+        console.log("[SWAT Autofill] injectSaveWatcher a échoué :", e);
+        finish();
+      }
+    });
   }
 
   function sendProgress(payload) {
@@ -36,7 +62,7 @@
   }
 
   async function process(fieldMap, profile, options = {}) {
-    injectSaveWatcher();
+    await injectSaveWatcher();
     return window.SwatEngine.process(fieldMap, profile, { ...options, onProgress: sendProgress });
   }
 

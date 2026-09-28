@@ -576,27 +576,69 @@
     return m ? m[1].toUpperCase() : null;
   }
 
+  /**
+   * v3.2.0 — Exécute un fetch() dans le contexte de LA PAGE via inject.js
+   * (voir son commentaire "Pont fetch"), plutôt que depuis le monde isolé
+   * du content script. Ne s'active QUE pour la variante extension, quand
+   * inject.js a eu le temps de poser son marqueur sur le DOM (seul canal
+   * traversant la frontière entre les deux `window` distincts). Pour la
+   * variante userscript, ce marqueur n'existe jamais (pas d'inject.js) —
+   * `fetchJson` retombe alors sur un `fetch()` direct, déjà correct
+   * puisqu'un userscript `@grant none` tourne déjà dans le contexte de la
+   * page.
+   *
+   * Piste concrète pour l'erreur 403 persistante sur la résolution du
+   * Workload (voir CHANGELOG.md) : ce même appel réussit de façon fiable
+   * quand c'est le JS de la page qui l'exécute, jamais depuis le content
+   * script — plutôt que de deviner un énième en-tête (2 déjà essayés sans
+   * succès sur une branche parallèle), l'appel part maintenant du même
+   * contexte d'exécution que celui qui a toujours réussi.
+   */
+  function pageFetch(url, options) {
+    return new Promise((resolve, reject) => {
+      const id = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const timer = setTimeout(() => {
+        document.removeEventListener("swat-autofill-fetch-response", onResponse);
+        reject(new Error("délai dépassé en attendant la réponse du pont réseau (page) — inject.js a-t-il bien chargé ?"));
+      }, 15000);
+      function onResponse(e) {
+        if (!e.detail || e.detail.id !== id) return;
+        document.removeEventListener("swat-autofill-fetch-response", onResponse);
+        clearTimeout(timer);
+        if (e.detail.ok) resolve(e.detail);
+        else reject(new Error(e.detail.error || "échec du fetch via le pont réseau (page)"));
+      }
+      document.addEventListener("swat-autofill-fetch-response", onResponse);
+      document.dispatchEvent(new CustomEvent("swat-autofill-fetch-request", { detail: { id, url, options } }));
+    });
+  }
+
+  function hasFetchBridge() {
+    return !!(document.documentElement && document.documentElement.getAttribute("data-swat-fetch-bridge") === "1");
+  }
+
   async function fetchJson(url, options) {
-    const res = await fetch(url, options);
-    if (!res.ok) {
+    let status, text;
+    if (hasFetchBridge()) {
+      const result = await pageFetch(url, options);
+      status = result.status;
+      text = result.text || "";
+    } else {
+      const res = await fetch(url, options);
+      status = res.status;
+      text = await res.text();
+    }
+
+    if (!(status >= 200 && status < 300)) {
       // Le corps d'une réponse d'erreur (403 notamment) explique souvent la
       // vraie raison côté serveur (jeton manquant, origine refusée, règle
       // métier…) — l'inclure ici évite d'avoir à redemander une capture
-      // .har rien que pour voir ce texte. Best-effort : certaines réponses
-      // d'erreur n'ont pas de corps lisible, ou `res.text()` peut lui-même
-      // échouer (flux déjà consommé, connexion coupée) — jamais bloquant.
-      let bodySnippet = "";
-      try {
-        const body = await res.text();
-        if (body) bodySnippet = ` — corps de la réponse : ${body.slice(0, 300)}`;
-      } catch (e) {
-        // ignoré, best-effort
-      }
-      const err = new Error(`HTTP ${res.status} sur ${url}${bodySnippet}`);
-      err.httpStatus = res.status;
+      // .har rien que pour voir ce texte.
+      const bodySnippet = text ? ` — corps de la réponse : ${text.slice(0, 300)}` : "";
+      const err = new Error(`HTTP ${status} sur ${url}${bodySnippet}`);
+      err.httpStatus = status;
       throw err;
     }
-    const text = await res.text();
     try {
       return text ? JSON.parse(text) : null;
     } catch (e) {

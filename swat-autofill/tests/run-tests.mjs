@@ -62,22 +62,16 @@ async function test(name, fn) {
 
 /**
  * Mock réseau des mêmes endpoints que le <script> inline de la fixture
- * (tests/fixture/swatsheet-fixture.html) — nécessaire ICI EN PLUS, au
- * niveau réseau plutôt qu'en surchargeant window.fetch côté page, parce
- * qu'un content script d'extension (suite C) vit dans un "monde isolé" :
- * son window.fetch est une instance à part, jamais celle que le <script>
- * de la page a remplacée — ses appels sortent donc réellement sur le
- * réseau et n'atteignent QUE cette interception Playwright (qui, elle,
- * voit tout trafic quel que soit le "monde" JS d'origine). Couvre
- * uniquement le chemin heureux (groupe MET-SUP54) : les scénarios
- * d'erreur de l'API Workload sont déjà couverts côté suite A/B, qui n'ont
- * pas ce problème de monde isolé.
+ * (tests/fixture/swatsheet-fixture.html), au niveau réseau plutôt qu'en
+ * surchargeant window.fetch côté page. Depuis le pont fetch d'inject.js
+ * (v3.2.0), la suite C route ses appels Workload par le window.fetch de LA
+ * PAGE — donc par le mock JS de la fixture, comme les suites A/B — ce mock
+ * réseau Node ne sert plus de chemin principal pour ces appels, mais reste
+ * utile comme garde-fou : si le pont n'était pas disponible pour une raison
+ * quelconque, un fetch() isolé du content script tomberait ici plutôt que
+ * de sortir sur le vrai réseau (voir routeFixture ci-dessous, qui bloque
+ * tout le reste).
  */
-// Capture côté Node (pas côté page) des appels reçus par le mock réseau —
-// nécessaire pour la suite C : un appel émis par un content script (monde
-// isolé) ne passe jamais par window.__calls de la page (ce compteur n'est
-// mis à jour QUE pour les appels qui traversent le window.fetch de LA PAGE,
-// cf commentaire sur mockApiResponse ci-dessus).
 const networkCallLog = { workloadPayload: null };
 
 function mockApiResponse(url, method, postDataJson) {
@@ -451,6 +445,17 @@ async function suiteC() {
     });
 
     await test("remplissage réel de bout en bout, orchestré comme le ferait popup.js (content.js + core/engine.js + inject.js)", async () => {
+      // Compte les requêtes passées par le pont fetch d'inject.js (voir
+      // core/engine.js, pageFetch()) — sert plus bas à prouver que la
+      // résolution/création du Workload est bien passée par LA PAGE
+      // (contexte MAIN world), pas par le fetch() isolé du content script.
+      await fixturePage.evaluate(() => {
+        window.__bridgeRequestCount = 0;
+        document.addEventListener("swat-autofill-fetch-request", () => {
+          window.__bridgeRequestCount += 1;
+        });
+      });
+
       // On pilote depuis le service worker plutôt que depuis une page
       // popup.html ouverte comme onglet : un vrai popup MV3 n'est PAS un
       // onglet (chrome.tabs.query({active:true}) le confond sinon avec le
@@ -489,11 +494,24 @@ async function suiteC() {
       assert.equal(requiredBefore, "FABRICATION (M)");
       const saveCount = await fixturePage.evaluate(() => window.__calls.saveCount);
       assert.ok(saveCount >= 1, "inject.js doit avoir observé la sauvegarde réseau réelle de la page");
-      // Le POST de création du Workload part du content script (monde
-      // isolé, cf core/engine.js) : capturé côté Node (networkCallLog),
-      // pas via window.__calls de la page — voir mockApiResponse plus haut.
-      assert.ok(networkCallLog.workloadPayload, "le POST de création du Workload doit avoir été observé");
-      assert.equal(networkCallLog.workloadPayload.assignedBdiGroup, 4185);
+
+      // Le pont fetch (v3.2.0) doit avoir été utilisé : les 3 GET de
+      // résolution (parentId, groupes, membres) + le POST de création
+      // partent tous de core/engine.js -> resolveWorkloadTargets/
+      // driveWorkload -> fetchJson -> pageFetch(), donc du contexte MAIN
+      // world de la page (inject.js), plus jamais du fetch() isolé du
+      // content script — c'est tout l'objet de ce changement (piste pour
+      // le 403 persistant, voir CHANGELOG.md).
+      const bridgeRequestCount = await fixturePage.evaluate(() => window.__bridgeRequestCount);
+      assert.ok(bridgeRequestCount >= 4, `le pont fetch doit avoir vu au moins 4 requêtes (parentId, groupes, membres, création) — vu : ${bridgeRequestCount}`);
+
+      // Passant par le pont, ces appels traversent maintenant le fetch()
+      // DE LA PAGE — donc le mock JS de la fixture elle-même (le même
+      // mécanisme que les suites A/B), plus le mock réseau Node
+      // (networkCallLog) qui ne servait qu'à l'ancien chemin isolé.
+      const workloadPayload = await fixturePage.evaluate(() => window.__calls.workloadPayload);
+      assert.ok(workloadPayload, "le POST de création du Workload doit avoir été observé par le mock de la fixture");
+      assert.equal(workloadPayload.assignedBdiGroup, 4185);
     });
 
     await fixturePage.close();

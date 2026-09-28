@@ -1,5 +1,60 @@
 # Changelog
 
+## v3.2.0 — Pont fetch pour le Workload : appels réseau exécutés par LA PAGE, pas par le content script
+
+Tentative concrète pour le 403 persistant sur `GET
+/api/swatsheet/parent/{code}/parentId` (premier appel de résolution du
+Workload) — voir la note v3.1.1 ci-dessous pour l'historique complet.
+Deux en-têtes différents avaient déjà été essayés sur la branche v2.x
+parallèle sans succès (`X-Requested-With`, `credentials` explicite) : au
+lieu de deviner un troisième en-tête, ce correctif change QUI exécute
+l'appel.
+
+**Le vrai changement** : pour la variante extension, `core/engine.js`
+tourne dans le "monde isolé" du content script — un contexte JS
+techniquement séparé de celui de la page (même DOM, `window` différent),
+qui partage les cookies mais reste un contexte d'exécution distinct pour
+le navigateur. C'est précisément la variable qui n'a jamais été éliminée
+dans l'enquête précédente : le même appel réussit de façon fiable quand
+c'est LE JS DE LA PAGE qui l'exécute, jamais quand c'est le content
+script — peu importe les en-têtes.
+
+- **`inject.js`** (déjà chargé dans le contexte de la page pour observer
+  la sauvegarde) expose maintenant aussi un **pont fetch** : il écoute un
+  évènement `swat-autofill-fetch-request` (id, url, options), exécute le
+  `fetch()` demandé lui-même — donc depuis le contexte de la page — et
+  répond via `swat-autofill-fetch-response` (id, status, corps). Pose un
+  attribut marqueur sur `<html>` (`data-swat-fetch-bridge`) dès qu'il est
+  prêt — seul moyen fiable de signaler sa présence à travers la frontière
+  entre les deux `window` (un flag posé sur l'un n'est pas visible depuis
+  l'autre).
+- **`core/engine.js`** (`fetchJson`) utilise ce pont dès qu'il est
+  disponible (`pageFetch()`), et retombe sur un `fetch()` direct sinon —
+  ce qui reste correct et inchangé pour la variante userscript, déjà
+  exécutée nativement dans le contexte de la page (`@grant none`), donc
+  sans ce problème dès le départ.
+- **`content.js`** attend maintenant que `inject.js` ait réellement fini
+  de charger (au lieu de l'injecter en tir-et-oublie) avant de lancer le
+  remplissage, pour ne jamais rater la fenêtre où le marqueur du pont
+  apparaît.
+- Nouveau test dédié (suite C) qui compte les évènements
+  `swat-autofill-fetch-request` observés pendant un remplissage réel avec
+  Workload activé, et vérifie qu'il y en a bien au moins 4 (3 résolutions
+  + 1 création) — preuve que le mécanisme s'active réellement, pas
+  seulement qu'il est câblé. Suite complète : 14/14 verts.
+
+**Ce que ça prouve, et ce que ça ne prouve pas** : les tests confirment
+que le pont fonctionne correctement de bout en bout dans un environnement
+simulé — ils ne peuvent PAS confirmer que ça résout le vrai 403 sur
+`swatsheet.ca.aero.bombardier.net`, inaccessible depuis l'environnement de
+développement. C'est le changement le mieux justifié qu'on puisse faire
+sans deviner à l'aveugle (il élimine une vraie différence de contexte
+d'exécution documentée, plutôt que de parier sur un en-tête), mais il a
+besoin d'une confirmation en conditions réelles avant d'être considéré
+résolu. Si le 403 persiste malgré ce changement, ça éliminerait
+définitivement "monde isolé vs page" comme cause, et recentrerait
+l'enquête sur les hypothèses réseau/auth restantes (voir v3.1.1).
+
 ## v3.1.1 — fetchJson : capture le corps de la réponse en cas d'erreur HTTP
 
 Petit changement, porté d'une branche v2.x parallèle (voir note ci-dessous)

@@ -15,9 +15,23 @@
  * donc core/engine.js peut y installer directement son propre intercepteur
  * (voir installSaveWatcher() dans core/engine.js) sans pont DOM.
  *
- * Ce fichier ne fait qu'annoncer, via un CustomEvent partagé, qu'un
- * PUT .../reviewandapprove/update a répondu 200 — c'est core/engine.js
- * (waitForSave()) qui écoute cet évènement, dans les deux variantes.
+ * Deux rôles, tous les deux par pont d'évènements DOM (le seul canal
+ * partagé entre le "monde isolé" du content script et le contexte JS de
+ * la page — ce sont deux `window` distincts malgré le même DOM) :
+ *
+ * 1. Annoncer qu'un PUT .../reviewandapprove/update a répondu 200 — lu par
+ *    core/engine.js (waitForSave()), dans les deux variantes.
+ * 2. v3.2.0 — PONT RÉSEAU pour la création de Workload (voir §"pont fetch"
+ *    plus bas) : exécute les appels réseau demandés par core/engine.js
+ *    DIRECTEMENT dans le contexte de la page, plutôt que depuis le monde
+ *    isolé du content script. Piste concrète pour l'erreur 403 persistante
+ *    sur `GET /api/swatsheet/parent/{code}/parentId` (voir CHANGELOG.md) :
+ *    ce même appel réussit de façon fiable quand c'est le JS de LA PAGE qui
+ *    l'exécute, jamais quand c'est le content script — deux en-têtes
+ *    différents ont déjà été essayés sans succès (X-Requested-With,
+ *    credentials explicites), donc plutôt que de deviner encore un
+ *    en-tête, on fait exécuter l'appel par un contexte JS identique à celui
+ *    de la page elle-même, qui a toujours réussi.
  */
 (function () {
   if (window.__swatSaveInterceptorInstalled) return;
@@ -59,4 +73,41 @@
       return origSend.apply(this, args);
     };
   }
+
+  // -----------------------------------------------------------------------
+  // Pont fetch — exécute un fetch() demandé par core/engine.js (monde isolé)
+  // ICI, dans le contexte de la page. `window.fetch` référencé ci-dessous
+  // EST déjà celui, potentiellement instrumenté juste au-dessus par ce même
+  // fichier (le PUT de sauvegarde reste observable même pour un appel émis
+  // via ce pont) — mais ce n'est de toute façon jamais le cas ici, ce pont
+  // ne sert qu'aux GET/POST de résolution/création du Workload.
+  //
+  // Protocole (CustomEvent — seul canal traversant la frontière des deux
+  // "window" distincts, cf commentaire en tête de fichier) :
+  //   demande  : "swat-autofill-fetch-request"  { id, url, options }
+  //   réponse  : "swat-autofill-fetch-response" { id, ok, status, text }
+  //                                        ou    { id, ok:false, error }
+  //
+  // `document.documentElement` porte un attribut marqueur, posé de façon
+  // synchrone ci-dessous — c'est le seul moyen fiable pour core/engine.js
+  // (autre "window") de savoir que ce pont est bien en place avant de s'en
+  // servir, puisqu'un flag posé sur `window` ici ne serait PAS visible de
+  // l'autre côté (deux objets globaux distincts malgré le DOM partagé).
+  // -----------------------------------------------------------------------
+  document.addEventListener("swat-autofill-fetch-request", async (e) => {
+    const { id, url, options } = (e && e.detail) || {};
+    if (!id) return;
+    try {
+      const res = await window.fetch(url, options);
+      const text = await res.text();
+      document.dispatchEvent(
+        new CustomEvent("swat-autofill-fetch-response", { detail: { id, ok: true, status: res.status, text } })
+      );
+    } catch (err) {
+      document.dispatchEvent(
+        new CustomEvent("swat-autofill-fetch-response", { detail: { id, ok: false, error: String((err && err.message) || err) } })
+      );
+    }
+  });
+  document.documentElement.setAttribute("data-swat-fetch-bridge", "1");
 })();

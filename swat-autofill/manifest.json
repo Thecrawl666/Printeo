@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SWAT Autofill",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "description": "Remplissage automatique des formulaires RFC/SWAT (Swatsheet) — profils pilotés par des fichiers JSON. Compatible Chrome et Edge (Manifest V3 standard, aucune API propriétaire).",
 
   "action": {
