@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SWAT Autofill
 // @namespace    swat-autofill
-// @version      3.1.0
+// @version      3.1.1
 // @description  Remplissage automatique des formulaires RFC/SWAT (Swatsheet) — panneau flottant, profils JSON embarqués. Généré depuis core/ — ne pas éditer ce fichier à la main, voir tools/build-userscript.mjs.
 // @author       Alex Alfonsi
 // @match        *://swatsheet.ca.aero.bombardier.net/*
@@ -609,7 +609,20 @@
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
     if (!res.ok) {
-      const err = new Error(`HTTP ${res.status} sur ${url}`);
+      // Le corps d'une réponse d'erreur (403 notamment) explique souvent la
+      // vraie raison côté serveur (jeton manquant, origine refusée, règle
+      // métier…) — l'inclure ici évite d'avoir à redemander une capture
+      // .har rien que pour voir ce texte. Best-effort : certaines réponses
+      // d'erreur n'ont pas de corps lisible, ou `res.text()` peut lui-même
+      // échouer (flux déjà consommé, connexion coupée) — jamais bloquant.
+      let bodySnippet = "";
+      try {
+        const body = await res.text();
+        if (body) bodySnippet = ` — corps de la réponse : ${body.slice(0, 300)}`;
+      } catch (e) {
+        // ignoré, best-effort
+      }
+      const err = new Error(`HTTP ${res.status} sur ${url}${bodySnippet}`);
       err.httpStatus = res.status;
       throw err;
     }

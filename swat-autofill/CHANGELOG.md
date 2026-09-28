@@ -1,5 +1,58 @@
 # Changelog
 
+## v3.1.1 — fetchJson : capture le corps de la réponse en cas d'erreur HTTP
+
+Petit changement, porté d'une branche v2.x parallèle (voir note ci-dessous)
+qui l'avait déjà fait en v2.9.2 : `fetchJson()` (utilisée par la résolution
+Workload) inclut maintenant le corps de la réponse HTTP dans le message
+d'erreur en cas d'échec (`res.status` hors 2xx), au lieu de juste
+`HTTP 403 sur /api/...`. Le corps d'une réponse 403/401 explique souvent la
+vraie raison côté serveur — inclure ça évite d'avoir à redemander une
+capture réseau rien que pour voir ce texte.
+
+### Note — deux lignées parallèles du même projet
+
+Un document de passation (`HANDOFF.md`, daté du 28 septembre) a révélé
+qu'une **branche v2.x séparée** de cette même extension (simple dossier
+JS/JSON, sans `core/engine.js` ni variante userscript, livrée en zip) a
+continué d'évoluer en parallèle de cette refonte v3, jusqu'à sa version
+2.9.2, via une autre session. Les deux lignées documentent **le même bug
+non résolu** :
+
+**`GET /api/swatsheet/parent/{code}/parentId` → 403 Forbidden**, systématique
+dès le premier appel de résolution du Workload — alors que ce même appel
+répond `200 OK` de façon fiable quand c'est la page Swatsheet elle-même qui
+l'exécute (confirmé par plusieurs captures `.har` sur la lignée v2.x).
+
+Deux correctifs déjà tentés sur la lignée v2.x, **sans succès confirmé** —
+à ne pas retenter en l'état sur cette branche sans nouvelle piste :
+- ajouter l'en-tête `X-Requested-With: XMLHttpRequest` ;
+- expliciter `credentials: "same-origin"`.
+
+Hypothèses non tranchées (aucune confirmée, aucune infirmée) :
+- authentification réseau/proxy de type Windows Integrated/NTLM/Kerberos,
+  courante sur les intranets d'entreprise — expliquerait un 403 "propre"
+  malgré une session utilisateur par ailleurs valide ;
+- une différence sur les en-têtes `Referer`/`Origin`/`Sec-Fetch-Site` entre
+  un fetch émis par la page elle-même et un fetch émis par un content
+  script (même origine, mais deux contextes d'exécution distincts —
+  voir `README.md` sur la différence extension/userscript à ce sujet) ;
+- deux tentatives de capturer l'appel RÉEL et défaillant de l'extension
+  (pas celui de la page) via DevTools ont échoué (l'appel n'apparaissait
+  dans aucune des deux captures Réseau), sans qu'on sache si c'est un
+  problème de timing de capture ou une particularité de Chrome/DevTools
+  qui masquerait certains `fetch()` de content script — jamais vérifié.
+
+Cette branche a un avantage que la lignée v2.x n'avait pas pour investiguer
+ça : `host_permissions` (v3.0.0) au lieu de `activeTab`, qui change le
+contexte de permission du `fetch()` — pas confirmé que ça change quoi que
+ce soit au 403 (les causes suspectées ci-dessus sont plutôt réseau/en-têtes
+que permissions d'extension), mais à noter au prochain test réel.
+
+**À faire au prochain rapport d'erreur** : le message inclut maintenant le
+corps de la réponse (voir ci-dessus) — c'est la piste la plus rapide vers
+la vraie cause, plutôt que deviner un énième en-tête à ajouter.
+
 ## v3.1.0 — Collage CKEditor : détection d'une annulation par l'éditeur + repli natif
 
 Trouvé sur un premier vrai test en conditions réelles (2026-09-25,
